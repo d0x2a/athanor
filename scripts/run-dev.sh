@@ -16,9 +16,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$ROOT/build/dev/Athanor.app"
 
+source "$ROOT/scripts/swift-flags.sh"
+
 echo "▶ building (debug)"
-swift build --package-path "$ROOT"
-BIN_DIR="$(swift build --package-path "$ROOT" --show-bin-path)"
+swift build --package-path "$ROOT" "${SWIFT_FLAGS[@]}"
+BIN_DIR="$(swift build --package-path "$ROOT" "${SWIFT_FLAGS[@]}" --show-bin-path)"
 
 echo "▶ bundling $APP"
 "$ROOT/scripts/bundle.sh" "$BIN_DIR" "$APP" com.d0x2a.athanor.dev 0.0.0-dev 1

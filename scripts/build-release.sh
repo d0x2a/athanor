@@ -50,7 +50,8 @@ echo "▶ building release binaries (arm64)"
 # The arch is spelled out so the result doesn't depend on which Mac builds
 # it, and it has to be on --show-bin-path too or that answers for a
 # different build.
-BUILD_FLAGS=(-c release --arch arm64)
+source "$ROOT/scripts/swift-flags.sh"
+BUILD_FLAGS=(-c release --arch arm64 "${SWIFT_FLAGS[@]}")
 swift build --package-path "$ROOT" "${BUILD_FLAGS[@]}"
 BIN_DIR="$(swift build --package-path "$ROOT" "${BUILD_FLAGS[@]}" --show-bin-path)"
 

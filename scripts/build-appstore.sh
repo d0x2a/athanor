@@ -75,7 +75,8 @@ echo "▶ testing"
 swift test --package-path "$ROOT" 2>&1 | tail -1
 
 echo "▶ building release binaries (arm64)"
-BUILD_FLAGS=(-c release --arch arm64)
+source "$ROOT/scripts/swift-flags.sh"
+BUILD_FLAGS=(-c release --arch arm64 "${SWIFT_FLAGS[@]}")
 swift build --package-path "$ROOT" "${BUILD_FLAGS[@]}"
 BIN_DIR="$(swift build --package-path "$ROOT" "${BUILD_FLAGS[@]}" --show-bin-path)"
 
