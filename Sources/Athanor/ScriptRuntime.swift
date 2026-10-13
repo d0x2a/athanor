@@ -84,6 +84,8 @@ final class ScriptRuntime: Identifiable {
     @ObservationIgnored var stopRequested = false
     @ObservationIgnored var startAfterStop = false
     @ObservationIgnored var isOurChild = false
+    /// The write end of the shim's --lifeline pipe, in the sandbox.
+    @ObservationIgnored var lifeline: Int32?
     @ObservationIgnored var launchedConfig: ScriptConfig?
     @ObservationIgnored var exitSource: DispatchSourceProcess?
     @ObservationIgnored var restartWork: DispatchWorkItem?

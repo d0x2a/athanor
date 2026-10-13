@@ -4,7 +4,8 @@ import Foundation
 // athanor-shim: runs one script for Athanor.
 //
 //   athanor-shim --id ID --log FILE --status FILE --cwd DIR
-//                [--signal TERM] [--timeout 10] [--log-cap BYTES] -- COMMAND
+//                [--signal TERM] [--timeout 10] [--log-cap BYTES] [--lifeline]
+//                -- COMMAND
 //
 // Athanor starts one per script, in a session of its own, so it outlives the
 // app. It runs COMMAND with /bin/sh -c in a new process group, timestamps every
@@ -12,6 +13,11 @@ import Foundation
 // ended in the status file. On SIGTERM, SIGINT or SIGHUP it stops the script's
 // whole group with --signal, then SIGKILL after --timeout seconds, and exits
 // once the script has.
+//
+// With --lifeline, standard input is a pipe whose other end Athanor holds, and
+// the shim stops its script when that pipe closes: when Athanor exits, however
+// it exits. The App Store build uses it, since in the App Sandbox the next
+// copy of Athanor couldn't signal this shim to stop it.
 
 struct Options {
     var id = ""
@@ -22,6 +28,7 @@ struct Options {
     var stopSignal = SIGTERM
     var stopTimeout = 10.0
     var logCap: Int64 = 10 * 1024 * 1024
+    var lifeline = false
 
     static func parse(_ arguments: [String]) -> Options? {
         var options = Options()
@@ -31,6 +38,11 @@ struct Options {
             if flag == "--" {
                 options.command = arguments[(index + 1)...].joined(separator: " ")
                 break
+            }
+            if flag == "--lifeline" {
+                options.lifeline = true
+                index += 1
+                continue
             }
             guard index + 1 < arguments.count else { return nil }
             let value = arguments[index + 1]
@@ -89,6 +101,7 @@ final class Shim: @unchecked Sendable {
             keepAlive.append(source)
         }
         Darwin.signal(SIGPIPE, SIG_IGN)
+        if options.lifeline { watchLifeline() }
         queue.async { [self] in start() }
         dispatchMain()
     }
@@ -197,6 +210,24 @@ final class Shim: @unchecked Sendable {
 
     // MARK: Stopping
 
+    /// Athanor never writes to the pipe: anything that ends the wait is
+    /// end of file, or an error that counts as one.
+    private func watchLifeline() {
+        _ = fcntl(STDIN_FILENO, F_SETFL, fcntl(STDIN_FILENO, F_GETFL) | O_NONBLOCK)
+        let source = DispatchSource.makeReadSource(fileDescriptor: STDIN_FILENO, queue: queue)
+        source.setEventHandler { [self, weak source] in
+            var byte: UInt8 = 0
+            let count = read(STDIN_FILENO, &byte, 1)
+            if count > 0 || (count < 0 && (errno == EAGAIN || errno == EINTR)) { return }
+            source?.cancel()
+            guard !stopping, !finished else { return }
+            log.write(.ath, "Athanor quit · stopping")
+            stop()
+        }
+        source.resume()
+        keepAlive.append(source)
+    }
+
     private func stop() {
         guard !stopping, !finished else { return }
         stopping = true
@@ -290,7 +321,7 @@ final class Shim: @unchecked Sendable {
 
 guard let options = Options.parse(CommandLine.arguments) else {
     FileHandle.standardError.write(Data(
-        "usage: athanor-shim --id ID --log FILE --status FILE --cwd DIR [--signal TERM] [--timeout 10] [--log-cap BYTES] -- COMMAND\n".utf8
+        "usage: athanor-shim --id ID --log FILE --status FILE --cwd DIR [--signal TERM] [--timeout 10] [--log-cap BYTES] [--lifeline] -- COMMAND\n".utf8
     ))
     exit(64)
 }

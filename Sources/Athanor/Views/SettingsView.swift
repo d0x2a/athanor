@@ -41,22 +41,29 @@ struct SettingsView: View {
             }
 
             section("When you quit Athanor") {
-                Picker("When you quit Athanor", selection: $settings.quitBehavior) {
-                    Text("Stop all scripts").tag(QuitBehavior.stop)
-                    Text("Leave them running and reconnect next time").tag(QuitBehavior.leave)
-                    Text("Ask each time").tag(QuitBehavior.ask)
-                }
-                .pickerStyle(.radioGroup)
-                .labelsHidden()
-                .padding(.horizontal, 14)
-                .padding(.top, 10)
-                Text("Scripts left running keep writing to their log files. Athanor finds them again when it reopens.")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Theme.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                if Sandbox.isActive {
+                    Text("Athanor stops all scripts when it quits.")
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                } else {
+                    Picker("When you quit Athanor", selection: $settings.quitBehavior) {
+                        Text("Stop all scripts").tag(QuitBehavior.stop)
+                        Text("Leave them running and reconnect next time").tag(QuitBehavior.leave)
+                        Text("Ask each time").tag(QuitBehavior.ask)
+                    }
+                    .pickerStyle(.radioGroup)
+                    .labelsHidden()
                     .padding(.horizontal, 14)
-                    .padding(.top, 6)
-                    .padding(.bottom, 12)
+                    .padding(.top, 10)
+                    Text("Scripts left running keep writing to their log files. Athanor finds them again when it reopens.")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 14)
+                        .padding(.top, 6)
+                        .padding(.bottom, 12)
+                }
             }
 
             section("Notify me when") {

@@ -8,6 +8,9 @@
     <string>Athanor</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
+    <!-- The icon in Assets.car; scripts/bundle.sh compiles it. -->
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>__BUNDLE_ID__</string>
     <key>CFBundleInfoDictionaryVersion</key>
@@ -26,6 +29,10 @@
     <string>14.0</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.developer-tools</string>
+    <!-- No encryption beyond HTTPS for ready checks, which is exempt: App
+         Store Connect stops asking about export compliance on every upload. -->
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
     <!-- Menu bar only: no Dock icon until a window is open. -->
     <key>LSUIElement</key>
     <true/>

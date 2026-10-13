@@ -125,6 +125,23 @@ CPU, memory (physical footprint, as Activity Monitor shows) and listening TCP
 ports come from libproc every 2 seconds, summed over the script's process
 tree and process group.
 
+### The Mac App Store build
+
+The App Store build is the same binaries with the App Sandbox switched on,
+which changes a few things:
+
+- Scripts run inside Athanor's sandbox. Their home folder is Athanor's
+  container (`~/Library/Containers/com.d0x2a.athanor/Data`, where
+  `scripts.toml` lives too), and they can't reach the rest of the disk,
+  Homebrew, or Apple's developer tools such as `python3` and `git`. What comes
+  with macOS works: `caffeinate`, `curl`, `pmset`, `nc` and the like.
+- Scripts stop when Athanor quits. A new copy of Athanor can't signal shims
+  an earlier copy started, so each shim gets a pipe from Athanor on its stdin
+  and stops its script when the pipe closes, which happens however Athanor
+  exits, crashes included.
+- Memory is resident size, not footprint, and the only port shown is the one a
+  ready check found open: the sandbox hides the rest.
+
 ## Building
 
 ```sh
@@ -132,7 +149,12 @@ swift test                   # unit tests, plus the real shim end to end
 ./scripts/run-dev.sh         # debug build in build/dev, signed ad hoc, opened
 ATHANOR_HOME=/tmp/ath ./scripts/run-dev.sh   # …on a scratch set of scripts
 ./scripts/build-release.sh   # signed, notarized and stapled app and DMG in build/release
+./scripts/build-appstore.sh  # sandboxed app in a signed pkg for App Store Connect, in build/appstore
+LOCAL=1 ./scripts/build-appstore.sh   # …or the sandboxed app signed ad hoc, to try it here
 ```
+
+`build-appstore.sh` needs an Installer certificate and a provisioning profile
+the first time; the comments at the top say where to get them.
 
 `build-release.sh` signs with the Dox2A Labs Developer ID and notarizes with
 the `kuddo-notary` keychain profile; see the comments at the top for the
@@ -146,6 +168,10 @@ runs per script list: a second copy says so and quits.
 `Athanor --snapshot DIR` renders the popover, the windows and the app icon to
 PNGs in light and dark, from the current script list, without starting or
 stopping anything.
+
+## Privacy
+
+Athanor collects no data and sends nothing anywhere; see [PRIVACY.md](PRIVACY.md).
 
 ## License
 

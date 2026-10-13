@@ -171,8 +171,12 @@ struct EditorView: View {
                         TextField("", text: $draft.cwd, prompt: Text("~"))
                             .textFieldStyle(.roundedBorder)
                             .font(Theme.mono(12))
-                        Button("Choose…", action: chooseFolder)
-                            .buttonStyle(FilledButtonStyle(height: 24, bordered: true))
+                        // In the sandbox a chosen folder would be out of the
+                        // script's reach by the next launch.
+                        if !Sandbox.isActive {
+                            Button("Choose…", action: chooseFolder)
+                                .buttonStyle(FilledButtonStyle(height: 24, bordered: true))
+                        }
                     }
                 }
                 GridRow {
@@ -203,16 +207,18 @@ struct EditorView: View {
                             Label("Add variable", systemImage: "plus")
                         }
                         .buttonStyle(FilledButtonStyle(height: 24))
-                        Toggle(isOn: $draft.useLoginEnvironment) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Use the environment from my login shell")
-                                Text("Apps started from the Dock or at login don’t get your Terminal’s PATH, so Homebrew, pip and nvm tools aren’t found without this.")
-                                    .font(.system(size: 11.5))
-                                    .foregroundStyle(Theme.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
+                        if !Sandbox.isActive {
+                            Toggle(isOn: $draft.useLoginEnvironment) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Use the environment from my login shell")
+                                    Text("Apps started from the Dock or at login don’t get your Terminal’s PATH, so Homebrew, pip and nvm tools aren’t found without this.")
+                                        .font(.system(size: 11.5))
+                                        .foregroundStyle(Theme.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
                             }
+                            .padding(.top, 6)
                         }
-                        .padding(.top, 6)
                     }
                 }
 

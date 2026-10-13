@@ -5,3 +5,6 @@
 *.xcodeproj
 xcuserdata/
 DerivedData/
+
+# The Mac App Store provisioning profile (see scripts/build-appstore.sh).
+/Resources/AppStore/*.provisionprofile

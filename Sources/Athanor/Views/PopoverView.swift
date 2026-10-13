@@ -168,6 +168,22 @@ private struct EmptyStateView: View {
     private var examples: [Example] {
         var awake = ScriptConfig(id: "", name: "caffeinate", command: "caffeinate -dims")
         awake.useLoginEnvironment = false
+        if Sandbox.isActive {
+            // Scripts there can't reach Homebrew or Apple's developer tools
+            // (python3 among them), only what comes with macOS.
+            let site = ScriptConfig(
+                id: "", name: "site check",
+                command: "while true; do curl -s -o /dev/null -w '%{http_code}\\n' https://www.apple.com; sleep 60; done"
+            )
+            let battery = ScriptConfig(
+                id: "", name: "battery", command: "while true; do pmset -g batt | tail -1; sleep 300; done"
+            )
+            return [
+                Example(title: "Keep the Mac awake", config: awake),
+                Example(title: "Check a website every minute", config: site),
+                Example(title: "Log the battery every 5 minutes", config: battery),
+            ]
+        }
         let model = ScriptConfig(id: "", name: "rapid-mlx", command: "rapid-mlx serve <model>")
         var http = ScriptConfig(id: "", name: "http server", command: "python3 -m http.server 8000")
         http.ready = .port(8000)

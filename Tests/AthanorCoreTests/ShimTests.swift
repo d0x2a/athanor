@@ -45,7 +45,9 @@ struct ShimTests {
         return url.appendingPathComponent("athanor-shim").path
     }
 
-    func launch(_ command: String, cwd: String? = nil, extra: [String] = [], binary: String = shimPath) throws -> Run {
+    func launch(
+        _ command: String, cwd: String? = nil, extra: [String] = [], binary: String = shimPath, stdin: Int32? = nil
+    ) throws -> Run {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("athanor-shim-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -55,6 +57,7 @@ struct ShimTests {
             arguments: ["--id", "s", "--log", run.log.path, "--status", run.statusURL.path,
                         "--cwd", cwd ?? directory.path] + extra + ["--", command],
             environment: ["PATH": "/usr/bin:/bin", "GREETING": "hello"],
+            stdin: stdin,
             newSession: true
         )
         return Run(directory: directory, pid: pid)
@@ -90,6 +93,30 @@ struct ShimTests {
         let status = try #require(ShimStatus.read(run.statusURL))
         #expect(status.stopRequested == true)
         #expect(status.signal == SIGTERM)
+        #expect(run.lines.last?.text == "stopped · SIGTERM")
+        usleep(100_000)
+        #expect(ProcTree.groupMembers(group).isEmpty)
+    }
+
+    /// The App Store build: when Athanor exits, its end of the pipe closes.
+    @Test func stopsWhenTheLifelineCloses() throws {
+        var lifeline: [Int32] = [0, 0]
+        #expect(pipe(&lifeline) == 0)
+        for fd in lifeline { _ = fcntl(fd, F_SETFD, FD_CLOEXEC) }
+        let run = try launch("sleep 30 & sleep 30; wait", extra: ["--lifeline"], stdin: lifeline[0])
+        close(lifeline[0])
+        let started = try #require(run.waitForStatus { $0.childPid != nil })
+        usleep(200_000)
+        let group = try #require(started.childPid)
+        let tree = ProcTree.tree(root: run.pid, group: group)
+        #expect(tree.contains(group))
+        #expect(tree.count >= 3)
+        close(lifeline[1])
+        #expect(run.waitForExit(timeout: 5))
+        let status = try #require(ShimStatus.read(run.statusURL))
+        #expect(status.stopRequested == true)
+        #expect(status.signal == SIGTERM)
+        #expect(run.lines.contains { $0.text == "Athanor quit · stopping" })
         #expect(run.lines.last?.text == "stopped · SIGTERM")
         usleep(100_000)
         #expect(ProcTree.groupMembers(group).isEmpty)

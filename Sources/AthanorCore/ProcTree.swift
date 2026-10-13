@@ -15,41 +15,70 @@ package struct ProcSample: Sendable, Equatable {
     }
 }
 
+/// Every process's parent and group, as of one moment.
+///
+/// From sysctl rather than libproc's proc_listchildpids and proc_listpids,
+/// which the App Sandbox refuses.
+package struct ProcTable: Sendable {
+    private var childrenByParent: [pid_t: [pid_t]] = [:]
+    private var membersByGroup: [pid_t: [pid_t]] = [:]
+
+    package static func current() -> ProcTable {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
+        var table = ProcTable()
+        // Processes start between sizing the buffer and filling it: leave
+        // room, and try again if it still wasn't enough.
+        for _ in 0..<3 {
+            var size = 0
+            guard sysctl(&mib, 4, nil, &size, nil, 0) == 0 else { return table }
+            let stride = MemoryLayout<kinfo_proc>.stride
+            var list = [kinfo_proc](repeating: kinfo_proc(), count: size / stride + 64)
+            size = list.count * stride
+            if sysctl(&mib, 4, &list, &size, nil, 0) != 0 {
+                if errno == ENOMEM { continue }
+                return table
+            }
+            for entry in list.prefix(size / stride) {
+                let pid = entry.kp_proc.p_pid
+                guard pid > 0 else { continue }
+                table.childrenByParent[entry.kp_eproc.e_ppid, default: []].append(pid)
+                table.membersByGroup[entry.kp_eproc.e_pgid, default: []].append(pid)
+            }
+            return table
+        }
+        return table
+    }
+
+    package func children(of pid: pid_t) -> [pid_t] {
+        childrenByParent[pid] ?? []
+    }
+
+    package func members(of group: pid_t) -> [pid_t] {
+        membersByGroup[group] ?? []
+    }
+}
+
 /// libproc lookups for one process or a tree of them.
 package enum ProcTree {
     package static func exists(_ pid: pid_t) -> Bool {
         pid > 0 && (kill(pid, 0) == 0 || errno == EPERM)
     }
 
-    package static func children(of pid: pid_t) -> [pid_t] {
-        var buffer = [pid_t](repeating: 0, count: 512)
-        let count = buffer.withUnsafeMutableBytes {
-            proc_listchildpids(pid, $0.baseAddress, Int32($0.count))
-        }
-        guard count > 0 else { return [] }
-        return Array(buffer.prefix(Int(count))).filter { $0 > 0 }
-    }
-
     package static func groupMembers(_ group: pid_t) -> [pid_t] {
-        var buffer = [pid_t](repeating: 0, count: 512)
-        let bytes = buffer.withUnsafeMutableBytes {
-            proc_listpids(UInt32(PROC_PGRP_ONLY), UInt32(group), $0.baseAddress, Int32($0.count))
-        }
-        guard bytes > 0 else { return [] }
-        return Array(buffer.prefix(Int(bytes) / MemoryLayout<pid_t>.size)).filter { $0 > 0 }
+        ProcTable.current().members(of: group)
     }
 
     /// Everything under `root` (not `root` itself), plus whatever is still in
     /// `group`: a process whose parent quit has left the tree but not the group.
-    package static func tree(root: pid_t, group: pid_t?) -> [pid_t] {
-        var queue = children(of: root)
-        if let group, group > 0 { queue += groupMembers(group) }
+    package static func tree(root: pid_t, group: pid_t?, in table: ProcTable = .current()) -> [pid_t] {
+        var queue = table.children(of: root)
+        if let group, group > 0 { queue += table.members(of: group) }
         var seen = Set<pid_t>()
         var out: [pid_t] = []
         while let pid = queue.popLast() {
             guard pid != root, seen.insert(pid).inserted else { continue }
             out.append(pid)
-            queue += children(of: pid)
+            queue += table.children(of: pid)
         }
         return out
     }
@@ -81,7 +110,17 @@ package enum ProcTree {
         return result == 0 ? info.ri_phys_footprint : nil
     }
 
-    /// TCP ports the process is listening on.
+    /// Resident memory. Counts shared pages that the footprint leaves out, but
+    /// the App Sandbox allows it where it refuses the footprint.
+    package static func residentSize(_ pid: pid_t) -> UInt64? {
+        var info = proc_taskinfo()
+        let size = Int32(MemoryLayout<proc_taskinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &info, size) == size else { return nil }
+        return info.pti_resident_size
+    }
+
+    /// TCP ports the process is listening on. Always none in the App
+    /// Sandbox, which doesn't let a process list another's files.
     package static func listeningPorts(_ pid: pid_t) -> [UInt16] {
         let needed = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nil, 0)
         guard needed > 0 else { return [] }
@@ -158,8 +197,9 @@ package final class ProcSampler: @unchecked Sendable {
     package func sample(_ roots: [Root], ports: Bool) -> [String: ProcSample] {
         var results: [String: ProcSample] = [:]
         var seen = Set<pid_t>()
+        let table = ProcTable.current()
         for root in roots {
-            let pids = ProcTree.tree(root: root.pid, group: root.group)
+            let pids = ProcTree.tree(root: root.pid, group: root.group, in: table)
             let now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
             var cpu = 0.0
             var memory: UInt64 = 0
@@ -172,7 +212,7 @@ package final class ProcSampler: @unchecked Sendable {
                     }
                     previous[pid] = (total, now)
                 }
-                memory += ProcTree.footprint(pid) ?? 0
+                memory += ProcTree.footprint(pid) ?? ProcTree.residentSize(pid) ?? 0
                 if ports { portSet.formUnion(ProcTree.listeningPorts(pid)) }
             }
             results[root.id] = ProcSample(

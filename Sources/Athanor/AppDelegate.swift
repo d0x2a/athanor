@@ -82,7 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let model, model.hasActiveScripts else { return .terminateNow }
-        switch model.settings.quitBehavior {
+        switch Sandbox.isActive ? .stop : model.settings.quitBehavior {
         case .leave:
             return .terminateNow
         case .stop:

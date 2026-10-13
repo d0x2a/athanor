@@ -18,7 +18,8 @@ enum ScriptEvent {
 /// the app. Starting a script spawns a shim; stopping one sends the shim
 /// SIGTERM. Because shims don't depend on the app, quitting Athanor can leave
 /// scripts running, and the next launch finds them again through the status
-/// file each shim writes.
+/// file each shim writes. In the App Sandbox scripts stop with Athanor
+/// instead (see Sandbox).
 @MainActor @Observable
 final class AppModel {
     let paths: AthanorPaths
@@ -91,6 +92,7 @@ final class AppModel {
     }
 
     private func resolveLoginEnvironment() {
+        guard !Sandbox.isActive else { return loginEnvironmentResolved(nil) }
         Task { [weak self] in
             let environment = await Task.detached(priority: .userInitiated) { LoginEnvironment.capture() }.value
             self?.loginEnvironmentResolved(environment)
@@ -287,9 +289,18 @@ final class AppModel {
             script.startedAt = Date(timeIntervalSince1970: status.startedAt)
             script.isOurChild = false
             script.launchedConfig = script.config
-            script.phase = .starting
-            watchExit(script)
-            checkReadiness(script)
+            if Sandbox.isActive {
+                // Left by a copy of Athanor that just quit: the shim is
+                // stopping its script, and this copy couldn't signal it anyway.
+                script.phase = .stopping
+                script.stopRequested = true
+                script.startAfterStop = script.config.autostart
+                watchExit(script)
+            } else {
+                script.phase = .starting
+                watchExit(script)
+                checkReadiness(script)
+            }
         } else if status.hasEnded {
             script.lastExit = ExitRecord(status: status, byUser: status.stopRequested == true)
         } else {
@@ -440,25 +451,36 @@ final class AppModel {
         }
         let statusURL = paths.statusFile(for: config.id)
         try? FileManager.default.removeItem(at: statusURL)
+        // In the sandbox the shim's stdin is a pipe this process holds the
+        // other end of; it closes when Athanor exits, and the shim then stops
+        // the script (see --lifeline).
+        var lifeline: [Int32] = [-1, -1]
+        if Sandbox.isActive, pipe(&lifeline) == 0 {
+            for fd in lifeline { _ = fcntl(fd, F_SETFD, FD_CLOEXEC) }
+        }
+        defer { if lifeline[0] >= 0 { close(lifeline[0]) } }
         do {
             for folder in [paths.logsDir, paths.runDir] {
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             }
+            var arguments = [
+                "--id", config.id,
+                "--log", paths.logFile(for: config.id).path,
+                "--status", statusURL.path,
+                "--cwd", config.cwd,
+                "--signal", config.stopSignal.rawValue,
+                "--timeout", String(config.stopTimeout),
+                "--log-cap", String(settings.logCapBytes),
+            ]
+            if lifeline[0] >= 0 { arguments.append("--lifeline") }
             let pid = try Spawn.spawn(
                 shimPath,
-                arguments: [
-                    "--id", config.id,
-                    "--log", paths.logFile(for: config.id).path,
-                    "--status", statusURL.path,
-                    "--cwd", config.cwd,
-                    "--signal", config.stopSignal.rawValue,
-                    "--timeout", String(config.stopTimeout),
-                    "--log-cap", String(settings.logCapBytes),
-                    "--", config.command,
-                ],
+                arguments: arguments + ["--", config.command],
                 environment: environment(for: config),
+                stdin: lifeline[0] >= 0 ? lifeline[0] : nil,
                 newSession: true
             )
+            if lifeline[1] >= 0 { script.lifeline = lifeline[1] }
             script.shimPid = pid
             script.childPid = nil
             script.isOurChild = true
@@ -474,6 +496,7 @@ final class AppModel {
             watchExit(script)
             checkReadiness(script)
         } catch {
+            if lifeline[1] >= 0 { close(lifeline[1]) }
             script.phase = .crashed
             script.lastExit = ExitRecord(code: nil, signal: nil, at: Date(), byUser: false, failure: "\(error)")
             script.crashNote = "Athanor couldn't start it: \(error)."
@@ -533,6 +556,10 @@ final class AppModel {
         script.killWork?.cancel()
         script.killWork = nil
         script.readinessTask?.cancel()
+        if let fd = script.lifeline {
+            close(fd)
+            script.lifeline = nil
+        }
         retiring.removeAll { $0 === script }
         let status = ShimStatus.read(paths.statusFile(for: script.id))
         if status?.hasEnded != true {
@@ -687,6 +714,12 @@ final class AppModel {
         for script in scripts where script.hasProcess {
             guard var sample = results[script.id] else { continue }
             if !withPorts { sample.ports = script.sample?.ports ?? [] }
+            // The sandbox hides other processes' sockets: show the port the
+            // ready check found open instead.
+            if Sandbox.isActive, sample.ports.isEmpty, script.phase == .running,
+               case .port(let port) = script.config.ready {
+                sample.ports = [UInt16(port)]
+            }
             script.sample = sample
             script.cpuHistory.append(sample.cpuPercent)
             script.memoryHistory.append(Double(sample.memoryBytes))

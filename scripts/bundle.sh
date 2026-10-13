@@ -25,7 +25,28 @@ sed -e "s|__BUNDLE_ID__|$BUNDLE_ID|g" \
     -e "s|__BUILD_NUMBER__|$BUILD_NUMBER|g" \
     "$ROOT/Resources/Info.plist" > "$APP/Contents/Info.plist"
 
-ICONSET="$(mktemp -d)/AppIcon.iconset"
+# The icon as Xcode ships it: an asset catalog (Assets.car), which the App
+# Store, Transporter and the Finder read, and a small AppIcon.icns beside it
+# for anything that only knows CFBundleIconFile.
+WORK="$(mktemp -d)"
+ICONSET="$WORK/Assets.xcassets/AppIcon.appiconset"
 "$APP/Contents/MacOS/Athanor" --export-iconset "$ICONSET"
-iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
-rm -rf "$(dirname "$ICONSET")"
+{
+    echo '{"info": {"author": "xcode", "version": 1}, "images": ['
+    SEP=""
+    for POINTS in 16 32 128 256 512; do
+        for SCALE in 1 2; do
+            SUFFIX=""
+            [[ "$SCALE" == 2 ]] && SUFFIX="@2x"
+            printf '%s{"idiom": "mac", "size": "%sx%s", "scale": "%sx", "filename": "icon_%sx%s%s.png"}\n' \
+                "$SEP" "$POINTS" "$POINTS" "$SCALE" "$POINTS" "$POINTS" "$SUFFIX"
+            SEP=","
+        done
+    done
+    echo ']}'
+} > "$ICONSET/Contents.json"
+xcrun actool "$WORK/Assets.xcassets" --compile "$APP/Contents/Resources" \
+    --platform macosx --minimum-deployment-target 14.0 --app-icon AppIcon \
+    --output-partial-info-plist "$WORK/partial.plist" > /dev/null
+test -f "$APP/Contents/Resources/Assets.car"
+rm -rf "$WORK"
