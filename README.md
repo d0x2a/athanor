@@ -10,6 +10,15 @@ a red dot when a script has crashed and stayed down.
 
 Requires macOS 14 or later on Apple silicon.
 
+## Installing
+
+```sh
+brew install --cask d0x2a/tap/athanor
+```
+
+Or download the DMG from [Releases](https://github.com/d0x2a/athanor/releases)
+and drag Athanor to Applications. It's signed and notarized.
+
 ## Using it
 
 Click the furnace in the menu bar (or press ⌥⌘A) for the list. Each script
@@ -86,8 +95,8 @@ command = "caffeinate -dims"  # everything else has a default
 
 Only `command` is required. Without `id`, one is made from the name; without
 `name`, the first word of the command is used. Keys Athanor doesn't know are
-ignored. Saving from the app rewrites the file in this form, comments
-included only in the header.
+ignored. Saving from the app rewrites only the entry of the script you
+changed; the rest of the file, comments included, stays as you wrote it.
 
 ### Log lines
 
