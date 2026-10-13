@@ -146,3 +146,7 @@ runs per script list: a second copy says so and quits.
 `Athanor --snapshot DIR` renders the popover, the windows and the app icon to
 PNGs in light and dark, from the current script list, without starting or
 stopping anything.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Copyright © 2026 Dox2A Labs LLC.
