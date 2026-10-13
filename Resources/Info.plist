@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>Athanor</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIdentifier</key>
+    <string>__BUNDLE_ID__</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>Athanor</string>
+    <key>CFBundleDisplayName</key>
+    <string>Athanor</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>__VERSION__</string>
+    <key>CFBundleVersion</key>
+    <string>__BUILD_NUMBER__</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.developer-tools</string>
+    <!-- Menu bar only: no Dock icon until a window is open. -->
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2026 Dox2A Labs LLC.</string>
+
+    <!-- Files-and-Folders prompts. Athanor itself doesn't read these places,
+         but the scripts it runs often do, and macOS asks on Athanor's behalf.
+         Without these strings the prompt doesn't say why. -->
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>A script you run with Athanor wants to use files on the Desktop.</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>A script you run with Athanor wants to use files in Documents.</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>A script you run with Athanor wants to use files in Downloads.</string>
+    <key>NSRemovableVolumesUsageDescription</key>
+    <string>A script you run with Athanor wants to use files on a removable volume.</string>
+    <key>NSNetworkVolumesUsageDescription</key>
+    <string>A script you run with Athanor wants to use files on a network volume.</string>
+</dict>
+</plist>
