@@ -8,6 +8,9 @@ import SwiftUI
 ///
 /// It loads the scripts and watches any that are already running, but starts
 /// nothing, and keeps its settings apart from the app's.
+///
+/// ATHANOR_SNAPSHOT_WAIT=SECONDS watches for longer before rendering, so the
+/// logs window's CPU and memory charts have some history to draw.
 @MainActor
 enum Snapshot {
     static func run(to directory: String) -> Never {
@@ -16,8 +19,9 @@ enum Snapshot {
         let defaults = UserDefaults(suiteName: "com.d0x2a.athanor.snapshot")!
         let model = AppModel(paths: .standard(), settings: AppSettings(defaults: defaults))
         model.bootstrap(supervise: false)
-        // Long enough for logs to load and two CPU samples to land.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+        // By default, long enough for logs to load and two CPU samples to land.
+        let wait = ProcessInfo.processInfo.environment["ATHANOR_SNAPSHOT_WAIT"].flatMap(TimeInterval.init) ?? 5
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait) {
             MainActor.assumeIsolated {
                 render(model, to: URL(fileURLWithPath: directory, isDirectory: true))
                 exit(0)

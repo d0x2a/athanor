@@ -289,9 +289,10 @@ final class AppModel {
             script.startedAt = Date(timeIntervalSince1970: status.startedAt)
             script.isOurChild = false
             script.launchedConfig = script.config
-            if Sandbox.isActive {
+            if Sandbox.isActive && supervising {
                 // Left by a copy of Athanor that just quit: the shim is
                 // stopping its script, and this copy couldn't signal it anyway.
+                // (A snapshot only looks, beside the copy that runs them.)
                 script.phase = .stopping
                 script.stopRequested = true
                 script.startAfterStop = script.config.autostart
