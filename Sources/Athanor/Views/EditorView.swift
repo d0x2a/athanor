@@ -173,7 +173,7 @@ struct EditorView: View {
                             .font(Theme.mono(12))
                         // In the sandbox a chosen folder would be out of the
                         // script's reach by the next launch.
-                        if !Sandbox.isActive {
+                        if !model.scriptsAreSandboxed {
                             Button("Choose…", action: chooseFolder)
                                 .buttonStyle(FilledButtonStyle(height: 24, bordered: true))
                         }
@@ -207,7 +207,7 @@ struct EditorView: View {
                             Label("Add variable", systemImage: "plus")
                         }
                         .buttonStyle(FilledButtonStyle(height: 24))
-                        if !Sandbox.isActive {
+                        if !model.scriptsAreSandboxed {
                             Toggle(isOn: $draft.useLoginEnvironment) {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("Use the environment from my login shell")

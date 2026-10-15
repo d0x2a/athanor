@@ -5,7 +5,7 @@ import Foundation
 //
 //   athanor-shim --id ID --log FILE --status FILE --cwd DIR
 //                [--signal TERM] [--timeout 10] [--log-cap BYTES] [--lifeline]
-//                -- COMMAND
+//                [--outside] -- COMMAND
 //
 // Athanor starts one per script, in a session of its own, so it outlives the
 // app. It runs COMMAND with /bin/sh -c in a new process group, timestamps every
@@ -18,6 +18,12 @@ import Foundation
 // the shim stops its script when that pipe closes: when Athanor exits, however
 // it exits. The App Store build uses it, since in the App Sandbox the next
 // copy of Athanor couldn't signal this shim to stop it.
+//
+// With --outside, the script is already running, outside the App Sandbox:
+// Athanor started it through athanor-runner (Resources/AppStore), and hands
+// the shim the runner's socket as fd 3 and the script's output and errors as
+// fds 4 and 5. The shim can't signal anything outside the sandbox, so it asks
+// the runner to, and learns the script's pid and exit from it.
 
 struct Options {
     var id = ""
@@ -29,6 +35,7 @@ struct Options {
     var stopTimeout = 10.0
     var logCap: Int64 = 10 * 1024 * 1024
     var lifeline = false
+    var outside = false
 
     static func parse(_ arguments: [String]) -> Options? {
         var options = Options()
@@ -39,8 +46,8 @@ struct Options {
                 options.command = arguments[(index + 1)...].joined(separator: " ")
                 break
             }
-            if flag == "--lifeline" {
-                options.lifeline = true
+            if flag == "--lifeline" || flag == "--outside" {
+                if flag == "--lifeline" { options.lifeline = true } else { options.outside = true }
                 index += 1
                 continue
             }
@@ -84,6 +91,8 @@ final class Shim: @unchecked Sendable {
     private var stopping = false
     private var stopRequestedAt: Date?
     private var finished = false
+    /// With --outside: what the runner has sent that isn't a whole line yet.
+    private var controlBuffer = Data()
 
     init(options: Options) {
         self.options = options
@@ -109,6 +118,7 @@ final class Shim: @unchecked Sendable {
     private func start() {
         // First thing, so Athanor can find this shim from here on.
         writeStatus()
+        if options.outside { return startOutside() }
         let folder = expandTilde(options.cwd)
         guard chdir(folder) == 0 else {
             fail("couldn't open the folder \(options.cwd): \(String(cString: strerror(errno)))", code: 126)
@@ -162,6 +172,101 @@ final class Shim: @unchecked Sendable {
 
         if stopping { sendStopSignal() }
         reap()
+    }
+
+    private func startOutside() {
+        for fd: Int32 in [3, 4, 5] {
+            _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
+            _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
+        }
+        // The output is read from "started" on, so the log opens with that line.
+        let source = DispatchSource.makeReadSource(fileDescriptor: 3, queue: queue)
+        source.setEventHandler { [self, weak source] in
+            if !readControl() { source?.cancel() }
+        }
+        source.resume()
+        keepAlive.append(source)
+
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 1, repeating: 1)
+        timer.setEventHandler { [self] in flushStaleLines() }
+        timer.resume()
+        keepAlive.append(timer)
+    }
+
+    /// Acts on whole lines from the runner. False once it has gone.
+    private func readControl() -> Bool {
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let count = read(3, &buffer, buffer.count)
+            if count > 0 {
+                controlBuffer.append(contentsOf: buffer[0..<count])
+                while let newline = controlBuffer.firstIndex(of: 10) {
+                    let line = String(decoding: controlBuffer[controlBuffer.startIndex..<newline], as: UTF8.self)
+                    controlBuffer.removeSubrange(controlBuffer.startIndex...newline)
+                    handleControl(line)
+                }
+                continue
+            }
+            if count < 0, errno == EINTR { continue }
+            if count < 0, errno == EAGAIN { return true }
+            runnerGone()
+            return false
+        }
+    }
+
+    private func handleControl(_ line: String) {
+        let parts = line.split(separator: " ", maxSplits: 2).map(String.init)
+        switch parts.first {
+        case "started":
+            guard parts.count >= 2, let pid = pid_t(parts[1]), pid > 0 else { return }
+            childPid = pid
+            status.childPid = pid
+            writeStatus()
+            log.write(.ath, "started · pid \(pid) · \(parts.count > 2 ? parts[2] : options.cwd)")
+            watch(4, .out)
+            watch(5, .err)
+            if stopping { sendStopSignal() }
+        case "failed":
+            fail(String(line.dropFirst("failed ".count)), code: 126)
+        case "exited":
+            guard !finished, parts.count >= 2, let code = Int32(parts[1]) else { return }
+            // From bash's `wait`: 128 + the signal, for a script a signal ended.
+            if code > 128, code - 128 < NSIG {
+                finish(code: nil, signal: code - 128)
+            } else {
+                finish(code: code, signal: nil)
+            }
+        default:
+            break
+        }
+    }
+
+    /// The runner closed its end without saying how the script ended.
+    private func runnerGone() {
+        guard !finished else { return }
+        if childPid == 0 {
+            fail("Athanor’s runner didn’t start the script", code: 127)
+        }
+        log.write(.ath, "Athanor’s runner quit unexpectedly")
+        finish(code: nil, signal: SIGKILL)
+    }
+
+    /// The whole group: with kill, or by asking the runner.
+    private func signalGroup(_ signal: Int32) {
+        guard childPid > 0 else { return }
+        if options.outside {
+            let name = ExitDescription.signalName(signal).replacingOccurrences(of: "SIG", with: "")
+            RunnerSocket.write(Array("signal \(name)\n".utf8), to: 3)
+        } else {
+            kill(-childPid, signal)
+        }
+    }
+
+    /// Something is left in the group. Outside the sandbox kill can only
+    /// say the group exists (EPERM), not signal it.
+    private func groupExists() -> Bool {
+        kill(-childPid, 0) == 0 || (options.outside && errno == EPERM)
     }
 
     // MARK: Output
@@ -240,34 +345,34 @@ final class Shim: @unchecked Sendable {
     }
 
     private func sendStopSignal() {
-        kill(-childPid, options.stopSignal)
+        signalGroup(options.stopSignal)
         queue.asyncAfter(deadline: .now() + options.stopTimeout) { [self] in
             guard !finished else { return }
             let name = ExitDescription.signalName(options.stopSignal)
             log.write(.ath, "still running \(Int(options.stopTimeout)) s after \(name) · sending SIGKILL")
-            kill(-childPid, SIGKILL)
+            signalGroup(SIGKILL)
         }
     }
 
     // MARK: Exit
 
     private func reap() {
-        guard !finished, childPid > 0 else { return }
+        guard !finished, !options.outside, childPid > 0 else { return }
         var waitStatus: Int32 = 0
         let result = waitpid(childPid, &waitStatus, WNOHANG)
         guard result == childPid else { return }
-        finish(waitStatus)
+        let (code, signal) = ExitDescription.decode(waitStatus: waitStatus)
+        finish(code: code, signal: signal)
     }
 
-    private func finish(_ waitStatus: Int32) {
+    private func finish(code: Int32?, signal: Int32?) {
         finished = true
-        let (code, signal) = ExitDescription.decode(waitStatus: waitStatus)
         status.exitCode = code
         status.signal = signal
         // Whatever the script left running in its group goes with it: SIGTERM,
         // then SIGKILL for anything still there after a grace period (what's
         // left of the stop timeout, when stopping).
-        kill(-childPid, SIGTERM)
+        signalGroup(SIGTERM)
         let grace = stopRequestedAt.map { max(0.5, options.stopTimeout - Date().timeIntervalSince($0)) } ?? 2
         waitForGroup(until: Date() + grace) { [self] in
             finalize(code: code, signal: signal)
@@ -275,10 +380,10 @@ final class Shim: @unchecked Sendable {
     }
 
     private func waitForGroup(until deadline: Date, then done: @escaping @Sendable () -> Void) {
-        guard kill(-childPid, 0) == 0 else { return done() }
+        guard groupExists() else { return done() }
         guard Date() < deadline else {
             log.write(.ath, "sending SIGKILL to what the script left running")
-            kill(-childPid, SIGKILL)
+            signalGroup(SIGKILL)
             queue.asyncAfter(deadline: .now() + 0.2, execute: done)
             return
         }
@@ -321,7 +426,7 @@ final class Shim: @unchecked Sendable {
 
 guard let options = Options.parse(CommandLine.arguments) else {
     FileHandle.standardError.write(Data(
-        "usage: athanor-shim --id ID --log FILE --status FILE --cwd DIR [--signal TERM] [--timeout 10] [--log-cap BYTES] [--lifeline] -- COMMAND\n".utf8
+        "usage: athanor-shim --id ID --log FILE --status FILE --cwd DIR [--signal TERM] [--timeout 10] [--log-cap BYTES] [--lifeline] [--outside] -- COMMAND\n".utf8
     ))
     exit(64)
 }

@@ -1,0 +1,121 @@
+#!/bin/bash
+# Athanor's runner, for the Mac App Store build.
+#
+# Athanor keeps a copy in ~/Library/Application Scripts/com.d0x2a.athanor/
+# once you allow it in Settings. macOS runs what's in that folder for the app
+# but outside its App Sandbox (NSUserUnixTask), as you, so scripts reach
+# Homebrew, pip and your files the way they would from Terminal. Athanor
+# compares the copy with its own and asks to replace it when they differ.
+#
+#   athanor-runner env FLAGS
+#       Prints the login shell's environment between markers, for
+#       LoginEnvironment.parse. FLAGS is -ilc, or -lc.
+#   athanor-runner run SIGNAL TIMEOUT FOLDER COMMAND
+#       Runs COMMAND with /bin/sh -c in FOLDER, in a process group of its
+#       own, and returns at once.
+#
+# macOS shows a gear in the menu bar for as long as a script it started for an
+# app runs, with a Stop item that would end the runner but not the script. So
+# `run` leaves the work to a copy of itself in a process group of its own
+# (`supervise`, with the same arguments), which keeps the socket and the pipes,
+# and returns: the gear goes as soon as it comes.
+#
+# For `run`, standard input is a socket to the script's athanor-shim, which
+# writes the log and can't signal anything outside the sandbox itself. Athanor
+# sends the script's environment through it first, as NAME=VALUE entries each
+# ended by a NUL, then an empty one: not as arguments, which anyone on the Mac
+# can read with ps. The runner adds them to its own. After that, one line per
+# message:
+#   runner → shim   started PID FOLDER | failed MESSAGE | exited CODE
+#   shim → runner   signal NAME, for the script's process group
+# When the socket closes the shim has gone, Athanor with it: the runner stops
+# the group with SIGNAL, then SIGKILL after TIMEOUT seconds.
+#
+# bash because it's the shell here that gives a background job a process group
+# of its own outside a terminal (set -m); zsh and dash refuse.
+
+case ${1-} in
+env)
+    exec "${SHELL:-/bin/zsh}" "$2" \
+        "printf '%s' __ATHANOR_ENV_BEGIN__; /usr/bin/env -0; printf '%s' __ATHANOR_ENV_END__" \
+        </dev/null 2>/dev/null
+    ;;
+run)
+    [ $# -eq 5 ] || exit 64
+    set -m
+    /bin/bash "$0" supervise "$2" "$3" "$4" "$5" &
+    exit 0
+    ;;
+supervise)
+    [ $# -eq 5 ] || exit 64
+    ;;
+*)
+    echo "usage: athanor-runner env FLAGS | run SIGNAL TIMEOUT FOLDER COMMAND" >&2
+    exit 64
+    ;;
+esac
+
+signal=$2 timeout=$3 folder=$4 command=$5
+# A shim that's gone mustn't take the runner with it: it still has to stop the
+# script.
+trap '' PIPE
+
+# The socket moves to fd 3 and the script's standard error to fd 4. The
+# runner's own standard error, where bash reports a job it saw killed, goes
+# nowhere.
+exec 3<&0 4>&2 2>/dev/null </dev/null
+
+variables=()
+while IFS= read -r -d '' entry <&3 && [ -n "$entry" ]; do
+    variables+=("$entry")
+done
+
+path=$folder
+case $folder in
+"~") path=$HOME ;;
+"~/"*) path=$HOME/${folder#"~/"} ;;
+esac
+if ! cd "$path"; then
+    reason="No such file or directory"
+    [ -e "$path" ] && reason="Permission denied"
+    printf 'failed couldn'\''t open the folder %s: %s\n' "$folder" "$reason" >&3
+    exit 0
+fi
+shown=$PWD
+case $PWD in
+"$HOME") shown="~" ;;
+"$HOME"/*) shown="~${PWD#"$HOME"}" ;;
+esac
+
+set -m
+(
+    # Set by the service that starts the runner, for itself.
+    unset XPC_SERVICE_NAME XPC_FLAGS MallocNanoZone MallocSpaceEfficient OSLogRateLimit
+    for entry in "${variables[@]}"; do
+        export "$entry"
+    done
+    exec /bin/sh -c "$command" 2>&4 4>&-
+) 3>&- &
+pid=$!
+exec 4>&-
+printf 'started %s %s\n' "$pid" "$shown" >&3
+
+# Does what the shim asks until it goes, then stops the group itself.
+(
+    while IFS= read -r line <&3; do
+        case $line in
+        "signal "*) kill -s "${line#signal }" -- "-$pid" ;;
+        esac
+    done
+    kill -s "$signal" -- "-$pid" || exit 0
+    ticks=0
+    while kill -0 -- "-$pid" && [ "$ticks" -lt $((timeout * 10)) ]; do
+        sleep 0.1
+        ticks=$((ticks + 1))
+    done
+    kill -s KILL -- "-$pid"
+) &
+
+wait "$pid"
+printf 'exited %s\n' "$?" >&3
+wait

@@ -130,15 +130,34 @@ tree and process group.
 The App Store build is the same binaries with the App Sandbox switched on,
 which changes a few things:
 
-- Scripts run inside Athanor's sandbox. Their home folder is Athanor's
-  container (`~/Library/Containers/com.d0x2a.athanor/Data`, where
+- At first, scripts run inside Athanor's sandbox. Their home folder is
+  Athanor's container (`~/Library/Containers/com.d0x2a.athanor/Data`, where
   `scripts.toml` lives too), and they can't reach the rest of the disk,
-  Homebrew, or Apple's developer tools such as `python3` and `git`. What comes
-  with macOS works: `caffeinate`, `curl`, `pmset`, `nc` and the like.
+  Homebrew, or Apple's developer tools such as `python3` and `git`, and they
+  can't listen on a port. What comes with macOS works: `caffeinate`, `curl`,
+  `pmset` and the like.
+- **Settings → Where scripts run → Run Outside…** lets them out. Athanor asks,
+  with an open panel on `~/Library/Application Scripts/com.d0x2a.athanor`, to
+  put [`athanor-runner`](Resources/AppStore/athanor-runner) there. macOS runs
+  what's in that folder for the app as the user, outside the sandbox
+  (`NSUserUnixTask`), so scripts get the real home folder, the login shell's
+  environment, Homebrew and the user's files, as in the DMG build. Deleting
+  the runner puts them back in the sandbox; an Athanor update with a different
+  runner asks to replace it.
+- Only the app may start the runner (macOS refuses the shim), and nothing in
+  the sandbox may signal what it starts. So Athanor starts the runner with a
+  socket and two pipes and hands their other ends to the shim (`--outside`),
+  which logs as usual and asks the runner over the socket to send the stop
+  signal. The script's environment goes through the socket too, not on the
+  command line, where any user's `ps` could read it. The runner hands all
+  this to a copy of itself and returns at once: macOS's Script Monitor shows a
+  gear in the menu bar for as long as the runner runs, with a Stop item that
+  would end the runner but not the script.
 - Scripts stop when Athanor quits. A new copy of Athanor can't signal shims
   an earlier copy started, so each shim gets a pipe from Athanor on its stdin
   and stops its script when the pipe closes, which happens however Athanor
-  exits, crashes included.
+  exits, crashes included. A runner whose shim has gone stops its script
+  itself.
 - Memory is resident size, not footprint, and the only port shown is the one a
   ready check found open: the sandbox hides the rest.
 

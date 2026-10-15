@@ -6,6 +6,7 @@ struct SettingsView: View {
     let model: AppModel
     @Bindable var settings: AppSettings
     @State private var loginItemError: String?
+    @State private var runnerError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -37,6 +38,12 @@ struct SettingsView: View {
                         Spacer()
                         HotkeyRecorder(hotkey: $settings.hotkey)
                     }
+                }
+            }
+
+            if let runner = model.runner {
+                section("Where scripts run") {
+                    runnerSection(runner)
                 }
             }
 
@@ -75,11 +82,11 @@ struct SettingsView: View {
             }
 
             section("Files") {
-                fileRow("Script list", path: model.paths.scriptsFile, button: "Open in Editor") {
+                fileRow("Script list", shown: abbreviateHome(model.paths.scriptsFile.path), button: "Open in Editor") {
                     openScriptsFile(model.paths)
                 }
                 divider
-                fileRow("Logs", path: model.paths.logsDir, button: "Show in Finder") {
+                fileRow("Logs", shown: abbreviateHome(model.paths.logsDir.path), button: "Show in Finder") {
                     try? FileManager.default.createDirectory(at: model.paths.logsDir, withIntermediateDirectories: true)
                     NSWorkspace.shared.open(model.paths.logsDir)
                 }
@@ -109,8 +116,56 @@ struct SettingsView: View {
         .padding(24)
         .tint(Theme.accentFill)
         .frame(width: 600)
+        .onAppear { model.runner?.refresh() }
         .background(Theme.ground)
         .foregroundStyle(Theme.text)
+    }
+
+    @ViewBuilder
+    private func runnerSection(_ runner: Runner) -> some View {
+        switch runner.state {
+        case .ready:
+            fileRow("Outside the App Sandbox", shown: runner.shownPath, button: "Show in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([runner.url])
+            }
+            note("Scripts run as they would from Terminal: with your login shell’s PATH, Homebrew, your own tools and your files. macOS starts them through Athanor’s runner, in the folder above. Delete it to keep scripts in the sandbox again.")
+        case .missing, .outdated:
+            row {
+                HStack(spacing: 12) {
+                    Text(runner.state == .missing ? "Inside the App Sandbox" : "Inside the App Sandbox, for now")
+                    Spacer()
+                    Button(runner.state == .missing ? "Run Outside…" : "Update Runner…") {
+                        do {
+                            try model.installRunner()
+                            runnerError = nil
+                        } catch {
+                            runnerError = error.localizedDescription
+                        }
+                    }
+                    .buttonStyle(FilledButtonStyle(height: 26, bordered: true))
+                }
+            }
+            if let runnerError {
+                Text(runnerError)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Theme.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 8)
+            }
+            note(runner.state == .missing
+                ? "Scripts can use what comes with macOS, like curl and caffeinate, but not Homebrew, pip, your own tools or your files, and they can’t listen on a port. To let them out, Athanor puts a small runner in a folder macOS keeps for it, and macOS runs that as you, outside the sandbox. You allow it once."
+                : "This version of Athanor comes with a new runner. Until it replaces the one in Application Scripts, scripts run inside the sandbox.")
+        }
+    }
+
+    private func note(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11.5))
+            .foregroundStyle(Theme.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 12)
     }
 
     // MARK: Pieces
@@ -154,11 +209,11 @@ struct SettingsView: View {
         Theme.line.frame(height: 1).padding(.horizontal, 14)
     }
 
-    private func fileRow(_ title: String, path: URL, button: String, action: @escaping () -> Void) -> some View {
+    private func fileRow(_ title: String, shown: String, button: String, action: @escaping () -> Void) -> some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                Text(abbreviateHome(path.path))
+                Text(shown)
                     .font(Theme.mono(11.5))
                     .foregroundStyle(Theme.secondary)
                     .lineLimit(1)

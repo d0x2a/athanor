@@ -3,17 +3,27 @@ import Darwin
 package struct SpawnError: Error, CustomStringConvertible {
     package let path: String
     package let code: Int32
+    /// A descriptor that couldn't be passed on, when that's what failed.
+    package var fd: Int32?
+
+    package init(path: String, code: Int32, fd: Int32? = nil) {
+        self.path = path
+        self.code = code
+        self.fd = fd
+    }
 
     package var description: String {
-        "couldn't run \(path): \(String(cString: strerror(code)))"
+        let what = fd.map { "pass descriptor \($0) to \(path)" } ?? "run \(path)"
+        return "couldn't \(what): \(String(cString: strerror(code)))"
     }
 }
 
 /// posix_spawn, for the two things Foundation's Process can't do: start a
 /// process in a session or process group of its own, and pass on no file
-/// descriptors but the three it's given.
+/// descriptors but the ones it's given.
 package enum Spawn {
-    /// Standard streams left nil read from or write to /dev/null.
+    /// Standard streams left nil read from or write to /dev/null. `inherit`
+    /// becomes the new process's descriptors 3, 4 and so on, in order.
     package static func spawn(
         _ path: String,
         arguments: [String],
@@ -21,6 +31,7 @@ package enum Spawn {
         stdin: Int32? = nil,
         stdout: Int32? = nil,
         stderr: Int32? = nil,
+        inherit: [Int32] = [],
         newSession: Bool = false,
         newProcessGroup: Bool = false
     ) throws -> pid_t {
@@ -36,6 +47,14 @@ package enum Spawn {
             } else {
                 posix_spawn_file_actions_addopen(&actions, stream.target, "/dev/null", stream.mode, 0)
             }
+        }
+        // Copies numbered above any target first, so that moving one into
+        // place can't overwrite another that's still to move.
+        let copies = inherit.map { fcntl($0, F_DUPFD_CLOEXEC, 3 + Int32(inherit.count)) }
+        defer { copies.filter { $0 >= 0 }.forEach { close($0) } }
+        if let failed = copies.firstIndex(of: -1) { throw SpawnError(path: path, code: errno, fd: inherit[failed]) }
+        for (index, copy) in copies.enumerated() {
+            posix_spawn_file_actions_adddup2(&actions, copy, 3 + Int32(index))
         }
 
         var attributes: posix_spawnattr_t? = nil

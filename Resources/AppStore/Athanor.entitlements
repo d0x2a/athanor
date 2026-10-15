@@ -6,11 +6,14 @@
 <dict>
     <key>com.apple.security.app-sandbox</key>
     <true/>
-    <!-- Ready checks: a port that opens, a URL that answers. -->
+    <!-- Ready checks: a port that opens, a URL that answers. No
+         network.server: Athanor listens on nothing, and App Review refuses
+         it for scripts that might. A script that serves needs the runner. -->
     <key>com.apple.security.network.client</key>
     <true/>
-    <!-- Scripts run in Athanor's sandbox, and many of them are servers. -->
-    <key>com.apple.security.network.server</key>
+    <!-- The editor's folder picker, and the open panel on Application Scripts
+         that lets Athanor put athanor-runner there (see Runner.swift). -->
+    <key>com.apple.security.files.user-selected.read-write</key>
     <true/>
 </dict>
 </plist>

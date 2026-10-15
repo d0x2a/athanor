@@ -8,6 +8,7 @@ struct PopoverView: View {
     let actions: PopoverActions
     let maxListHeight: CGFloat
     @State private var expanded: String?
+    @AppStorage("sandboxNoteDismissed") private var sandboxNoteDismissed = false
 
     init(model: AppModel, actions: PopoverActions, maxListHeight: CGFloat, initialExpanded: String? = nil) {
         self.model = model
@@ -22,6 +23,12 @@ struct PopoverView: View {
             Rule()
             if let error = model.fileError {
                 FileErrorBanner(message: error, keepsLastGood: !model.scripts.isEmpty, open: actions.openScriptsFile)
+                Rule()
+            }
+            if model.scriptsAreSandboxed, !sandboxNoteDismissed {
+                SandboxBanner(outdated: model.runner?.state == .outdated, setUp: actions.showSettings) {
+                    sandboxNoteDismissed = true
+                }
                 Rule()
             }
             if !model.scripts.isEmpty {
@@ -122,6 +129,44 @@ struct PopoverView: View {
     }
 }
 
+/// The store build, while scripts can't leave the App Sandbox.
+private struct SandboxBanner: View {
+    let outdated: Bool
+    let setUp: () -> Void
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "shippingbox")
+                .foregroundStyle(Theme.secondary)
+                .font(.system(size: 12))
+                .padding(.top, 1)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(outdated ? "Athanor’s runner needs updating" : "Scripts run in the App Sandbox")
+                    .font(.system(size: 12.5, weight: .semibold))
+                Text(outdated
+                    ? "Until it’s updated, scripts can’t reach Homebrew, your tools or your files."
+                    : "They can’t reach Homebrew, your tools or your files until you let them run outside it.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Theme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            Button("Set Up…", action: setUp)
+                .buttonStyle(SmallButtonStyle())
+            Button(action: dismiss) {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(Theme.secondary)
+            .help("Don’t show this again")
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+}
+
 /// scripts.toml didn't parse.
 private struct FileErrorBanner: View {
     let message: String
@@ -168,7 +213,7 @@ private struct EmptyStateView: View {
     private var examples: [Example] {
         var awake = ScriptConfig(id: "", name: "caffeinate", command: "caffeinate -dims")
         awake.useLoginEnvironment = false
-        if Sandbox.isActive {
+        if model.scriptsAreSandboxed {
             // Scripts there can't reach Homebrew or Apple's developer tools
             // (python3 among them), only what comes with macOS.
             let site = ScriptConfig(

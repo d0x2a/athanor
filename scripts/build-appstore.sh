@@ -82,6 +82,9 @@ BIN_DIR="$(swift build --package-path "$ROOT" "${BUILD_FLAGS[@]}" --show-bin-pat
 
 echo "▶ bundling (bundle=$BUNDLE_ID, version=$VERSION, build=$BUILD_NUMBER)"
 "$ROOT/scripts/bundle.sh" "$BIN_DIR" "$APP" "$BUNDLE_ID" "$VERSION" "$BUILD_NUMBER"
+# Not executable in the bundle: Athanor copies it to Application Scripts, and
+# makes it executable there, when the user allows it (see Runner.swift).
+install -m 644 "$ROOT/Resources/AppStore/athanor-runner" "$APP/Contents/Resources/athanor-runner"
 
 cp "$ROOT/Resources/AppStore/Athanor.entitlements" "$ENTITLEMENTS"
 if [[ "$LOCAL" == 1 ]]; then

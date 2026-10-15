@@ -19,11 +19,14 @@ enum ScriptEvent {
 /// SIGTERM. Because shims don't depend on the app, quitting Athanor can leave
 /// scripts running, and the next launch finds them again through the status
 /// file each shim writes. In the App Sandbox scripts stop with Athanor
-/// instead (see Sandbox).
+/// instead (see Sandbox), and run outside it once the user lets them (see
+/// Runner).
 @MainActor @Observable
 final class AppModel {
     let paths: AthanorPaths
     let settings: AppSettings
+    /// The App Store build's way out of the sandbox for scripts; nil in the DMG build.
+    let runner = Runner()
     private(set) var scripts: [ScriptRuntime] = []
     /// scripts.toml couldn't be read; the scripts from the last good read stay.
     private(set) var fileError: String?
@@ -91,12 +94,33 @@ final class AppModel {
         timers.append(timer)
     }
 
+    /// Scripts start in the App Sandbox: the store build, before the user has
+    /// let them out (or while the runner needs replacing).
+    var scriptsAreSandboxed: Bool {
+        Sandbox.isActive && runner?.state != .ready
+    }
+
     private func resolveLoginEnvironment() {
-        guard !Sandbox.isActive else { return loginEnvironmentResolved(nil) }
+        guard !scriptsAreSandboxed else { return loginEnvironmentResolved(nil) }
+        let runner = Sandbox.isActive ? runner : nil
         Task { [weak self] in
-            let environment = await Task.detached(priority: .userInitiated) { LoginEnvironment.capture() }.value
+            let environment: [String: String]?
+            if let runner {
+                environment = await runner.loginEnvironment()
+            } else {
+                environment = await Task.detached(priority: .userInitiated) { LoginEnvironment.capture() }.value
+            }
             self?.loginEnvironmentResolved(environment)
         }
+    }
+
+    /// Puts the runner in place (see Runner.install). Scripts started from
+    /// then on run outside the sandbox; running ones stay in it until restarted.
+    func installRunner() throws {
+        guard let runner, try runner.install() else { return }
+        loginEnvironment = nil
+        loginEnvironmentReady = false
+        resolveLoginEnvironment()
     }
 
     private func loginEnvironmentResolved(_ environment: [String: String]?) {
@@ -444,6 +468,8 @@ final class AppModel {
             return
         }
         let config = script.config
+        runner?.refresh()
+        let outside = scriptsAreSandboxed ? nil : runner
         if config.useLoginEnvironment, !loginEnvironmentReady {
             // Starts once the login shell has answered; until then it shows as starting.
             script.phase = .starting
@@ -474,11 +500,25 @@ final class AppModel {
                 "--log-cap", String(settings.logCapBytes),
             ]
             if lifeline[0] >= 0 { arguments.append("--lifeline") }
+            // Outside the sandbox the runner starts the script, before the shim
+            // that watches it: if the shim then fails, closing these stops it.
+            var handoff: [Int32] = []
+            defer { handoff.forEach { close($0) } }
+            if let outside {
+                let id = config.id
+                handoff = try outside.start(config, environment: outsideEnvironment(for: config)) { [weak self] reason in
+                    DispatchQueue.main.async {
+                        MainActor.assumeIsolated { self?.runnerFailed(id, reason) }
+                    }
+                }
+                arguments.append("--outside")
+            }
             let pid = try Spawn.spawn(
                 shimPath,
                 arguments: arguments + ["--", config.command],
                 environment: environment(for: config),
                 stdin: lifeline[0] >= 0 ? lifeline[0] : nil,
+                inherit: handoff,
                 newSession: true
             )
             if lifeline[1] >= 0 { script.lifeline = lifeline[1] }
@@ -520,6 +560,31 @@ final class AppModel {
         }
         environment["ATHANOR_SCRIPT"] = config.id
         return environment
+    }
+
+    /// For the runner, which adds these to the environment it starts with:
+    /// the user's own, with the real home folder, but launchd's bare PATH.
+    /// Nothing from this process's, whose home is the sandbox container.
+    private func outsideEnvironment(for config: ScriptConfig) -> [String: String] {
+        var environment: [String: String] = [:]
+        if config.useLoginEnvironment, let login = loginEnvironment {
+            environment = login
+        } else {
+            environment["PATH"] = LoginEnvironment.fallbackPath(nil)
+        }
+        if environment["LANG"] == nil { environment["LANG"] = "en_US.UTF-8" }
+        for variable in config.env where !variable.key.isEmpty {
+            environment[variable.key] = variable.value
+        }
+        environment["ATHANOR_SCRIPT"] = config.id
+        return environment
+    }
+
+    /// macOS couldn't run the runner. Said in the log only if the script never
+    /// started: the runner's own exit, after the script's, is no news.
+    private func runnerFailed(_ id: String, _ reason: String) {
+        guard let script = script(id), ShimStatus.read(paths.statusFile(for: id))?.childPid == nil else { return }
+        note(script, "couldn't run Athanor’s runner: \(reason)")
     }
 
     // MARK: Exits
@@ -595,7 +660,7 @@ final class AppModel {
         }
         guard script.config.restartOnCrash else {
             script.phase = .crashed
-            script.crashNote = "\(record.summary). Restart after a crash is off for this script."
+            script.crashNote = "\(record.summary). Restart after a crash is off for this script." + sandboxHint(record)
             onEvent?(.down(script))
             return
         }
@@ -616,13 +681,21 @@ final class AppModel {
         case .giveUp(let crashes, let span):
             script.phase = .crashed
             if crashes <= 1 {
-                script.crashNote = "\(record.summary). Its restart limit is 0, so it stays down."
+                script.crashNote = "\(record.summary). Its restart limit is 0, so it stays down." + sandboxHint(record)
             } else {
                 script.crashNote = "Crashed \(crashes) times in \(Self.spanText(span)). Auto-restart is paused until you start it again."
+                    + sandboxHint(record)
                 note(script, "gave up after \(crashes - 1) restarts · auto-restart paused")
             }
             onEvent?(.down(script))
         }
+    }
+
+    /// A command not found (127) or not allowed (126) in the sandbox is most
+    /// likely the sandbox's doing.
+    private func sandboxHint(_ record: ExitRecord) -> String {
+        guard scriptsAreSandboxed, record.signal == nil, record.code == 126 || record.code == 127 else { return "" }
+        return " Scripts are running in the App Sandbox, where Homebrew, your own tools and your files are out of reach. Settings can let them run outside it."
     }
 
     private static func spanText(_ seconds: TimeInterval) -> String {
