@@ -37,6 +37,14 @@ sed -e "s|__BUNDLE_ID__|$BUNDLE_ID|g" \
     -e "s|__BUILD_NUMBER__|$BUILD_NUMBER|g" \
     "$ROOT/Resources/Info.plist" > "$PLIST"
 
+# App Review refuses an Info.plist with XML comments in it. Converting
+# rewrites the file from what it parses, which leaves them out.
+plutil -convert xml1 "$PLIST"
+! grep -q '<!--' "$PLIST" || {
+    echo "✗ $PLIST still has XML comments in it" >&2
+    exit 1
+}
+
 # What Xcode writes into every app's Info.plist about the build. App Store
 # Connect reads the SDK and Xcode versions from here.
 SDK_BUILD="$(xcrun --sdk macosx --show-sdk-build-version)"
