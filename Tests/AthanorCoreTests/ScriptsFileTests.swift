@@ -147,9 +147,38 @@ struct ScriptsFileEditingTests {
 
         let withoutWeb = try #require(ScriptsFile.editing(Self.handWritten, id: "web", to: nil))
         #expect(try ScriptsFile.decode(withoutWeb).map(\.id) == ["tunnel"])
-        #expect(withoutWeb.contains("# my scripts, kept in dotfiles"))
-        #expect(withoutWeb.contains("# the tunnel needs VPN first"))
+        #expect(withoutWeb.hasPrefix("# my scripts, kept in dotfiles\n\n# the tunnel needs VPN first\n[[script]]"))
         #expect(!withoutWeb.contains("npm run dev"))
+    }
+
+    @Test func reordersWithCommentsAttached() throws {
+        let swapped = try #require(ScriptsFile.reordering(Self.handWritten, to: ["tunnel", "web"]))
+        #expect(try ScriptsFile.decode(swapped).map(\.id) == ["tunnel", "web"])
+        #expect(swapped.hasPrefix("# my scripts, kept in dotfiles\n\n# the tunnel needs VPN first\n[[script]]\nname = \"tunnel\""))
+        #expect(swapped.contains("[script.env]\nA = \"1\"\n\n[[script]]\nname = \"web\"   # the docs site"))
+        #expect(swapped.hasSuffix("color = \"blue\"        # a key Athanor doesn't know\n\n[extras]\nnote = \"kept\""))
+
+        #expect(ScriptsFile.reordering(swapped, to: ["web", "tunnel"]) == Self.handWritten)
+        #expect(ScriptsFile.reordering(Self.handWritten, to: ["web", "tunnel"]) == Self.handWritten)
+    }
+
+    @Test func removingFromTheMiddleLeavesOneBlankLine() throws {
+        let a = ScriptConfig(id: "a", name: "a", command: "a")
+        let b = ScriptConfig(id: "b", name: "b", command: "b")
+        let c = ScriptConfig(id: "c", name: "c", command: "c")
+        let removed = try #require(ScriptsFile.editing(ScriptsFile.encode([a, b, c]), id: "b", to: nil))
+        #expect(removed == ScriptsFile.encode([a, c]))
+    }
+
+    @Test func reordersAWrittenFile() throws {
+        let a = ScriptConfig(id: "a", name: "a", command: "a")
+        let b = ScriptConfig(id: "b", name: "b", command: "b\nexec c")
+        let c = ScriptConfig(id: "c", name: "c", command: "c")
+        let text = ScriptsFile.encode([a, b, c])
+        let moved = try #require(ScriptsFile.reordering(text, to: ["c", "a", "b"]))
+        #expect(moved.hasPrefix(ScriptsFile.header))
+        #expect(try ScriptsFile.decode(moved) == [c, a, b])
+        #expect(ScriptsFile.reordering(text, to: ["c", "a"]) == nil)
     }
 
     @Test func refusesWhatItCantReadBack() {

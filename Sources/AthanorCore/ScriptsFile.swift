@@ -101,11 +101,13 @@ package enum ScriptsFile {
         guard segments.count == current.count + 1 else { return nil }
         var expected = current
         if let index = current.firstIndex(where: { $0.id == id }) {
-            let (_, keep) = splitOffTail(segments[index + 1])
+            var (_, keep) = splitOffTail(segments[index + 1])
             if let config {
                 segments[index + 1] = block(config) + keep
                 expected[index] = config
             } else {
+                // One blank line where the script was, not two.
+                if segments[index].hasSuffix("\n\n"), keep.hasPrefix("\n") { keep.removeFirst() }
                 segments[index + 1] = keep
                 expected.remove(at: index)
             }
@@ -119,6 +121,32 @@ package enum ScriptsFile {
         }
         let result = segments.joined()
         guard let reread = try? decode(result), reread == expected else { return nil }
+        return result
+    }
+
+    /// The file with its scripts in the order of `ids`. Each script takes the
+    /// comment written directly above it along (no blank line between);
+    /// everything else, the blank lines and other tables among them, stays
+    /// where it was. Nil when that can't be done safely.
+    package static func reordering(_ text: String, to ids: [String]) -> String? {
+        guard let current = try? decode(text), current.map(\.id).sorted() == ids.sorted() else { return nil }
+        let segments = splitScripts(text)
+        guard segments.count == current.count + 1 else { return nil }
+        var gaps = [segments[0]]
+        var units: [String] = []
+        for segment in segments.dropFirst() {
+            let (script, rest) = splitOffTail(segment)
+            let (gap, comment) = splitOffComment(gaps.removeLast())
+            gaps.append(gap)
+            units.append(comment + script)
+            gaps.append(rest)
+        }
+        let order = ids.compactMap { id in current.firstIndex { $0.id == id } }
+        var result = gaps[0]
+        for (slot, index) in order.enumerated() {
+            result += units[index] + gaps[slot + 1]
+        }
+        guard let reread = try? decode(result), reread == order.map({ current[$0] }) else { return nil }
         return result
     }
 
@@ -163,6 +191,20 @@ package enum ScriptsFile {
         var rest = join(lines[tailStart...])
         if !endsWithBreak, rest.hasSuffix("\n") { rest.removeLast() }
         return (join(lines[..<tailStart]), rest)
+    }
+
+    /// Splits the comment lines that end `text`, which sit directly above the
+    /// script that follows, from what comes before them.
+    private static func splitOffComment(_ text: String) -> (rest: String, comment: String) {
+        guard text.hasSuffix("\n") else { return (text, "") }
+        var lines = text.components(separatedBy: "\n")
+        lines.removeLast()
+        var start = lines.count
+        while start > 0, lines[start - 1].trimmingCharacters(in: .whitespaces).hasPrefix("#") {
+            start -= 1
+        }
+        let join = { (part: ArraySlice<String>) in part.map { $0 + "\n" }.joined() }
+        return (join(lines[..<start]), join(lines[start...]))
     }
 
     package static let header = """

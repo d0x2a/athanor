@@ -33,7 +33,7 @@ enum Snapshot {
 
     private static func render(_ model: AppModel, to folder: URL) {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let actions = PopoverActions(addScript: { _ in }, edit: { _ in }, showLogs: { _ in },
+        let actions = PopoverActions(addScript: { _ in }, showScripts: { _ in }, showLogs: { _ in },
                                      showSettings: {}, openScriptsFile: {}, close: {})
         // Show a crash: the first script that has ever exited badly.
         if let flaky = model.scripts.first(where: { $0.lastExit?.crashed == true && !$0.hasProcess }) {
@@ -55,9 +55,10 @@ enum Snapshot {
                 capture(PopoverView(model: model, actions: actions, maxListHeight: 600, initialExpanded: crashed.id),
                         appearance: appearance, to: folder.appendingPathComponent("popover-crashed-\(name).png"))
             }
-            let editing = running?.config ?? model.scripts.first?.config
-            capture(EditorView(model: model, draft: EditorDraft(editing: editing)) {},
-                    appearance: appearance, to: folder.appendingPathComponent("editor-\(name).png"))
+            let scriptsState = ScriptsWindowState()
+            if let shown = running ?? model.scripts.first { scriptsState.select(shown.id, model: model) }
+            capture(ScriptsView(model: model, state: scriptsState).frame(width: 960, height: 680),
+                    appearance: appearance, to: folder.appendingPathComponent("scripts-\(name).png"))
             let logsState = LogsWindowState()
             logsState.selection = running?.id
             capture(LogsView(model: model, state: logsState) { _ in }.frame(width: 980, height: 620),

@@ -262,17 +262,43 @@ final class AppModel {
         }
     }
 
-    /// Edits the file as it is on disk now, not as last read, so a hand edit
-    /// from the last second isn't lost; and only the one script's lines, so
-    /// comments and keys Athanor doesn't know stay. Refuses while the file
-    /// doesn't parse, rather than overwrite the edit in progress.
+    /// Puts the scripts in scripts.toml in the order of `ids`. Any the list
+    /// doesn't name (added by hand a moment ago) go last.
+    func reorder(_ ids: [String]) throws {
+        let rank = Dictionary(ids.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+        let arranged = { (list: [ScriptConfig]) in
+            list.enumerated().sorted { a, b in
+                (rank[a.element.id] ?? ids.count, a.offset) < (rank[b.element.id] ?? ids.count, b.offset)
+            }.map(\.element)
+        }
+        try rewrite(splice: { ScriptsFile.reordering($0, to: arranged($1).map(\.id)) }, change: arranged)
+    }
+
     private func edit(id: String, to config: ScriptConfig?) throws {
+        try rewrite(splice: { text, _ in ScriptsFile.editing(text, id: id, to: config) }) { list in
+            var list = list
+            if let index = list.firstIndex(where: { $0.id == id }) {
+                if let config { list[index] = config } else { list.remove(at: index) }
+            } else if let config {
+                list.append(config)
+            }
+            return list
+        }
+    }
+
+    /// Changes the file as it is on disk now, not as last read, so a hand edit
+    /// from the last second isn't lost; and with `splice`, which touches only
+    /// the lines that change, so comments and keys Athanor doesn't know stay.
+    /// Refuses while the file doesn't parse, rather than overwrite the edit in
+    /// progress.
+    private func rewrite(splice: (String, [ScriptConfig]) -> String?,
+                         change: ([ScriptConfig]) -> [ScriptConfig]) throws {
         // Through a symlink (scripts.toml kept in a dotfiles repo), to its target.
         let url = paths.scriptsFile.resolvingSymlinksInPath()
         let existing = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
         let updated: String
         if existing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            updated = ScriptsFile.encode(config.map { [$0] } ?? [])
+            updated = ScriptsFile.encode(change([]))
         } else {
             let current: [ScriptConfig]
             do {
@@ -280,20 +306,14 @@ final class AppModel {
             } catch {
                 throw ScriptsFileError("scripts.toml has a mistake (\(error)). Fix it in the file first, so your edits there aren’t lost.")
             }
-            if let spliced = ScriptsFile.editing(existing, id: id, to: config) {
+            if let spliced = splice(existing, current) {
                 updated = spliced
             } else {
-                // Can't edit just the one script: write the file anew, after
-                // keeping a copy of the hand-written one.
-                var list = current
-                if let index = list.firstIndex(where: { $0.id == id }) {
-                    if let config { list[index] = config } else { list.remove(at: index) }
-                } else if let config {
-                    list.append(config)
-                }
+                // Can't splice: write the file anew, after keeping a copy of
+                // the hand-written one.
                 try existing.write(to: url.deletingLastPathComponent().appendingPathComponent("scripts.toml.bak"),
                                    atomically: true, encoding: .utf8)
-                updated = ScriptsFile.encode(list)
+                updated = ScriptsFile.encode(change(current))
             }
         }
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)

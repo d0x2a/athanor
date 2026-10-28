@@ -30,11 +30,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.actions = PopoverActions(
             addScript: { [weak self] template in
                 self?.statusItem.close()
-                self?.windows.showEditor(for: nil, template: template)
+                self?.windows.newScript(template: template)
             },
-            edit: { [weak self] id in
+            showScripts: { [weak self] id in
                 self?.statusItem.close()
-                self?.windows.showEditor(for: id)
+                self?.windows.showScripts(select: id)
             },
             showLogs: { [weak self] id in
                 self?.statusItem.close()
@@ -81,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if windows?.askAboutUnsavedScripts() == true { return .terminateCancel }
         guard let model, model.hasActiveScripts else { return .terminateNow }
         switch Sandbox.isActive ? .stop : model.settings.quitBehavior {
         case .leave:

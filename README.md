@@ -26,10 +26,18 @@ shows whether it's running, its CPU and memory, the ports it listens on and how
 long it has been up. Expand one for its pid, the last lines of its output and
 Restart, Open log, Edit and Copy command.
 
-- **Add a script** with **+**, or start from one of the examples on the empty
-  list. Each script runs with `/bin/sh -c`, so pipes, `&&`, variables and
+- **Scripts** opens the scripts window: every script on the left, the
+  selected one's settings on the right, with room for a long script and its
+  line numbers. **+** adds one (⌘N), the copy button duplicates it (⌘D), **−**
+  deletes it, and dragging one up or down reorders the list, which is the
+  menu's order too. Edit on a script, or **+** in the menu, opens the same
+  window. Changes wait until you save them (⌘S); **Save and Restart** (⌘↩)
+  saves and restarts the script so they take. A script with unsaved changes
+  has a dot beside it, and closing the window asks about them.
+- **Each script** runs with `/bin/sh -c`, so pipes, `&&`, variables and
   several lines all work. End with `exec program …` so Stop reaches the
-  program itself rather than only the shell.
+  program itself rather than only the shell. The empty list offers a few
+  examples to start from.
 - **Ready when** decides when a starting script counts as up: as soon as it
   starts, once a port is open on localhost, or once a URL answers. Until then
   its dot pulses.
@@ -96,7 +104,8 @@ command = "caffeinate -dims"  # everything else has a default
 Only `command` is required. Without `id`, one is made from the name; without
 `name`, the first word of the command is used. Keys Athanor doesn't know are
 ignored. Saving from the app rewrites only the entry of the script you
-changed; the rest of the file, comments included, stays as you wrote it.
+changed, and reordering moves entries along with the comment right above
+each; the rest of the file, comments included, stays as you wrote it.
 
 ### Log lines
 

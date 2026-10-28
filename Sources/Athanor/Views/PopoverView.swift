@@ -118,6 +118,8 @@ struct PopoverView: View {
                 .buttonStyle(FilledButtonStyle())
                 .disabled(!model.hasActiveScripts)
             Spacer(minLength: 0)
+            Button("Scripts") { actions.showScripts(nil) }
+                .buttonStyle(QuietButtonStyle())
             Button("Logs") { actions.showLogs(nil) }
                 .buttonStyle(QuietButtonStyle())
                 .disabled(model.scripts.isEmpty)
@@ -168,7 +170,7 @@ private struct SandboxBanner: View {
 }
 
 /// scripts.toml didn't parse.
-private struct FileErrorBanner: View {
+struct FileErrorBanner: View {
     let message: String
     let keepsLastGood: Bool
     let open: () -> Void

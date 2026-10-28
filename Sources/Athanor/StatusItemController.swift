@@ -5,7 +5,7 @@ import SwiftUI
 /// What the popover can ask of the rest of the app.
 struct PopoverActions {
     var addScript: (ScriptConfig?) -> Void
-    var edit: (String) -> Void
+    var showScripts: (String?) -> Void
     var showLogs: (String?) -> Void
     var showSettings: () -> Void
     var openScriptsFile: () -> Void

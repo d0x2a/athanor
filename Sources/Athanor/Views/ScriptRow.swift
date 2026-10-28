@@ -299,7 +299,7 @@ private struct RowDetail: View {
             }
             Button("Open log") { actions.showLogs(script.id) }
                 .buttonStyle(SmallButtonStyle())
-            Button("Edit") { actions.edit(script.id) }
+            Button("Edit") { actions.showScripts(script.id) }
                 .buttonStyle(SmallButtonStyle())
             if script.phase == .crashed {
                 Button("Dismiss") { model.dismiss(script) }
