@@ -65,8 +65,10 @@ final class WindowManager: NSObject, NSWindowDelegate {
             present(settingsWindow)
             return
         }
-        let window = makeWindow(title: "Athanor Settings",
-                                content: SettingsView(model: model, settings: model.settings), resizable: false)
+        let view = SettingsView(model: model, settings: model.settings) { [weak self] in
+            self?.showScripts(select: nil)
+        }
+        let window = makeWindow(title: "Athanor Settings", content: view, resizable: false)
         settingsWindow = window
         present(window)
     }

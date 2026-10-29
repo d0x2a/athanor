@@ -5,6 +5,7 @@ import SwiftUI
 struct SettingsView: View {
     let model: AppModel
     @Bindable var settings: AppSettings
+    let showScripts: () -> Void
     @State private var loginItemError: String?
     @State private var runnerError: String?
 
@@ -82,9 +83,7 @@ struct SettingsView: View {
             }
 
             section("Files") {
-                fileRow("Script list", shown: abbreviateHome(model.paths.scriptsFile.path), button: "Open in Editor") {
-                    openScriptsFile(model.paths)
-                }
+                fileRow("Script list", shown: abbreviateHome(model.paths.scriptsFile.path), button: "Edit Scripts", action: showScripts)
                 divider
                 fileRow("Logs", shown: abbreviateHome(model.paths.logsDir.path), button: "Show in Finder") {
                     try? FileManager.default.createDirectory(at: model.paths.logsDir, withIntermediateDirectories: true)
@@ -104,7 +103,7 @@ struct SettingsView: View {
                         .fixedSize()
                     }
                 }
-                Text("The script list is a plain text file: edit it by hand or keep it in your dotfiles. Athanor reloads it when it changes. A new log size applies the next time a script starts.")
+                Text("The script list is a plain text file, so you can also edit it by hand or keep it in your dotfiles: the Scripts window opens it from the bottom of its sidebar. Athanor reloads it when it changes. A new log size applies the next time a script starts.")
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.secondary)
                     .fixedSize(horizontal: false, vertical: true)

@@ -63,7 +63,7 @@ enum Snapshot {
             logsState.selection = running?.id
             capture(LogsView(model: model, state: logsState) { _ in }.frame(width: 980, height: 620),
                     appearance: appearance, to: folder.appendingPathComponent("logs-\(name).png"))
-            capture(SettingsView(model: model, settings: model.settings),
+            capture(SettingsView(model: model, settings: model.settings) {},
                     appearance: appearance, to: folder.appendingPathComponent("settings-\(name).png"))
         }
         let emptyPaths = AthanorPaths(root: folder.appendingPathComponent("empty-home"))
